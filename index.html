@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Colorimetro</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- jsPDF Library CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        canvas { border: 2px solid #e5e7eb; border-radius: 0.75rem; background-color: #ffffff; display: block; max-width: 100%; height: auto; cursor: crosshair; transition: box-shadow 0.3s ease; }
+        canvas:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .color-sample { width: 100%; height: 6rem; border-radius: 0.5rem; border: 1px solid #d1d5db; transition: background-color 0.3s ease; }
+        .btn-disabled { cursor: not-allowed; background-color: #9ca3af; }
+        
+        #magnifier-loupe {
+            position: absolute;
+            bottom: 1rem;
+            right: 1rem;
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            background-repeat: no-repeat;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 10;
+        }
+        #magnifier-coords {
+            position: absolute;
+            bottom: 10px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            background-color: rgba(0,0,0,0.6);
+            color: white;
+            font-size: 12px;
+            padding: 2px 0;
+            font-family: monospace;
+        }
+        #progress-bar {
+            transition: width 0.3s ease;
+        }
+        .modal-overlay {
+            transition: opacity 0.3s ease-in-out;
+        }
+        .modal-content {
+            transition: transform 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 flex flex-col items-center min-h-screen">
+
+    <main class="max-w-4xl w-full bg-white p-6 sm:p-8 rounded-xl shadow-lg border border-gray-200 relative">
+        <!-- Pulsante Info -->
+        <button id="infoButton" class="absolute top-4 right-4 text-gray-400 hover:text-blue-600 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        </button>
+
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-800 mb-6 text-center">
+            Colorimetro
+        </h1>
+
+        <div class="mb-6">
+            <label for="imageUpload" class="block text-lg font-medium text-gray-700 mb-2">Carica la tua immagine:</label>
+            <input type="file" id="imageUpload" accept="image/*" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+        </div>
+
+        <div id="progress-container" class="w-full bg-gray-200 rounded-full h-2.5 mb-4 hidden">
+            <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+            <div>
+                <label for="samplingMode" class="block text-lg font-medium text-gray-700 mb-2">Modalità di Campionamento:</label>
+                <select id="samplingMode" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-700">
+                    <option value="exact">SPOT esatto (singolo pixel)</option>
+                    <option value="weighted">Area con peso al centro</option>
+                    <option value="average" selected>Area con media uniforme</option>
+                </select>
+            </div>
+            <div>
+                <label for="spotSize" class="block text-lg font-medium text-gray-700 mb-2">Dimensione Area (pixel):</label>
+                <input type="number" id="spotSize" value="5" min="1" max="101" step="2" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-700">
+            </div>
+        </div>
+
+        <div id="canvas-container" class="relative mb-6 flex justify-center bg-gray-50 p-2 rounded-lg">
+            <canvas id="imageCanvas"></canvas>
+            <div id="selectionDot" class="absolute bg-red-500 rounded-full w-3 h-3 -translate-x-1/2 -translate-y-1/2 hidden ring-2 ring-white" style="pointer-events: none;"></div>
+            <div id="selectionArea" class="absolute border-2 border-blue-500 bg-blue-500 bg-opacity-25 hidden" style="pointer-events: none;"></div>
+            <div id="magnifier-loupe" class="hidden">
+                <div id="magnifier-coords">X: 0, Y: 0</div>
+            </div>
+        </div>
+
+        <div class="bg-gray-50 p-6 rounded-lg border border-gray-200">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4 text-center">Dettagli del Colore Selezionato</h2>
+            <div class="flex flex-col md:flex-row items-center gap-6">
+                <div class="w-full md:w-1/4">
+                    <div id="colorDisplay" class="color-sample shadow-inner w-full h-24"></div>
+                </div>
+                <div class="w-full md:w-3/4">
+                    <div class="text-center mb-4">
+                        <p class="text-gray-600 font-sans text-lg">Valore Munsell Stimato</p>
+                        <p id="munsellValue" class="text-4xl font-bold text-gray-800 font-mono tracking-wider py-2">N/A</p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-base">
+                        <p class="text-gray-700 font-mono p-2 bg-white rounded-md text-center"><strong class="block font-sans text-gray-500 text-sm">RGB</strong> <span id="rgbValue">N/A</span></p>
+                        <p class="text-gray-700 font-mono p-2 bg-white rounded-md text-center"><strong class="block font-sans text-gray-500 text-sm">Hex</strong> <span id="hexValue">N/A</span></p>
+                        <p class="text-gray-700 font-mono p-2 bg-white rounded-md text-center"><strong class="block font-sans text-gray-500 text-sm">HSL</strong> <span id="hslValue">N/A</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-6">
+            <label for="userNotes" class="block text-lg font-medium text-gray-700 mb-2">Note Libere:</label>
+            <textarea id="userNotes" rows="4" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-700" placeholder="Inserisci qui le tue annotazioni..."></textarea>
+        </div>
+        
+        <div class="mt-8 text-center">
+            <button id="exportPdfButton" class="bg-blue-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 transition-all duration-200 btn-disabled" disabled>
+                Esporta Report PDF
+            </button>
+        </div>
+
+        <div id="messageBox" class="mt-6 p-4 rounded-lg hidden transition-opacity duration-300" role="alert">
+            <p id="messageText"></p>
+        </div>
+    </main>
+
+    <footer class="text-center mt-8 pb-4">
+        <p class="text-xs text-gray-500">
+            Colorimetro v. 1.0 - © C. Tessaro
+        </p>
+    </footer>
+
+    <!-- Modale Documentazione -->
+    <div id="infoModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 hidden modal-overlay">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-8 modal-content scale-95">
+            <div class="flex justify-between items-start mb-4">
+                <h2 class="text-3xl font-bold text-gray-800">Documentazione e Teoria</h2>
+                <button id="closeModalButton" class="text-gray-500 hover:text-red-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2 2m2-2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </button>
+            </div>
+            <div class="prose max-w-none text-gray-700">
+                <h3 class="font-semibold text-xl text-gray-800">Guida all'Uso</h3>
+                <p>L'applicazione permette di analizzare il colore di un'immagine in pochi semplici passi:</p>
+                <ol class="list-decimal pl-5 space-y-2">
+                    <li><strong>Caricamento:</strong> Utilizzare il pulsante "Carica la tua immagine" per selezionare un file.</li>
+                    <li><strong>Impostazioni:</strong> Scegliere la modalità e la dimensione dell'area di campionamento.</li>
+                    <li><strong>Selezione:</strong> Cliccare sull'immagine nel punto di interesse. Una lente d'ingrandimento assiste nella selezione di precisione.</li>
+                    <li><strong>Risultati:</strong> La sezione "Dettagli del Colore" mostrerà la stima Munsell e i valori RGB, HEX e HSL.</li>
+                    <li><strong>Note:</strong> Aggiungere annotazioni contestuali nel campo "Note Libere".</li>
+                    <li><strong>Esportazione:</strong> Cliccare "Esporta Report PDF" per generare un documento completo dell'analisi.</li>
+                </ol>
+
+                <h3 class="font-semibold text-xl text-gray-800 mt-6">Fondamenti Teorici: La Conversione da RGB a Munsell</h3>
+                <p>La conversione di un colore da uno spazio digitale (RGB) a quello percettivo di Munsell non è un processo banale, in quanto non esiste una formula matematica diretta.</p>
+                <ul class="list-disc pl-5 space-y-2">
+                    <li><strong>RGB (Red, Green, Blue):</strong> È un modello <em>additivo</em> e <em>dipendente dal dispositivo</em>. Descrive come uno schermo produce i colori miscelando diverse intensità di luce.</li>
+                    <li><strong>Munsell (Hue, Value, Chroma):</strong> È un modello <em>percettivo</em>, basato su come l'occhio umano distingue i colori secondo Tinta, Valore (luminosità) e Croma (saturazione).</li>
+                </ul>
+                <p>Per tradurre un valore RGB, l'applicazione esegue internamente una catena di conversioni attraverso spazi colore standardizzati (CIE):</p>
+                <p class="text-center font-mono bg-gray-100 p-2 rounded-md">
+                    RGB → sRGB → CIEXYZ → CIELAB → Stima Munsell
+                </p>
+                <p>L'ultimo passaggio (CIELAB → Munsell) è una stima di alta qualità, ottenuta confrontando il colore con una tabella di campioni Munsell noti e trovando quello percettivamente più vicino.</p>
+            </div>
+        </div>
+    </div>
+
+
+<script>
+    // Initialize jsPDF
+    var jsPDF = window.jspdf.jsPDF;
+
+    // DOM Elements
+    var imageUpload = document.getElementById('imageUpload');
+    var imageCanvas = document.getElementById('imageCanvas');
+    var ctx = imageCanvas.getContext('2d');
+    var colorDisplay = document.getElementById('colorDisplay');
+    var rgbValue = document.getElementById('rgbValue');
+    var hexValue = document.getElementById('hexValue');
+    var hslValue = document.getElementById('hslValue');
+    var munsellValue = document.getElementById('munsellValue');
+    var selectionDot = document.getElementById('selectionDot');
+    var selectionArea = document.getElementById('selectionArea');
+    var messageBox = document.getElementById('messageBox');
+    var messageText = document.getElementById('messageText');
+    var samplingModeSelect = document.getElementById('samplingMode');
+    var spotSizeInput = document.getElementById('spotSize');
+    var exportPdfButton = document.getElementById('exportPdfButton');
+    var magnifierLoupe = document.getElementById('magnifier-loupe');
+    var magnifierCoords = document.getElementById('magnifier-coords');
+    var canvasContainer = document.getElementById('canvas-container');
+    var progressContainer = document.getElementById('progress-container');
+    var progressBar = document.getElementById('progress-bar');
+    var infoButton = document.getElementById('infoButton');
+    var infoModal = document.getElementById('infoModal');
+    var closeModalButton = document.getElementById('closeModalButton');
+
+    // State variables
+    var currentImage = new Image();
+    var messageTimeout;
+    var reportState = {
+        imageFileName: null,
+        clickCoordinates: null,
+        selectedColor: null,
+        samplingMode: null,
+        spotSize: null,
+        munsellValue: null
+    };
+    var zoomFactor = 4;
+
+    /**
+     * Debounce function to limit the rate at which a function gets called.
+     * @param {Function} func The function to debounce.
+     * @param {number} delay The delay in milliseconds.
+     */
+    function debounce(func, delay) {
+        var timeoutId;
+        delay = delay || 250;
+        return function() {
+            var context = this;
+            var args = arguments;
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(function() {
+                func.apply(context, args);
+            }, delay);
+        };
+    }
+
+    /**
+     * Shows a message to the user.
+     * @param {string} message The message to display.
+     * @param {string} type The type of message ('info' or 'error').
+     */
+    function showMessage(message, type) {
+        type = type || 'info';
+        clearTimeout(messageTimeout);
+        messageText.textContent = message;
+        messageBox.className = 'mt-6 p-4 rounded-lg transition-opacity duration-300';
+        if (type === 'error') {
+            messageBox.classList.add('bg-red-100', 'border-red-400', 'text-red-700');
+        } else {
+            messageBox.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
+        }
+        messageBox.classList.remove('hidden');
+        messageTimeout = setTimeout(function() {
+            messageBox.classList.add('hidden');
+        }, 5000);
+    }
+    
+    /**
+     * Converts RGB color values to a HEX string.
+     * @param {number} r Red value (0-255).
+     * @param {number} g Green value (0-255).
+     * @param {number} b Blue value (0-255).
+     * @returns {string} The HEX color string.
+     */
+    function rgbToHex(r, g, b) {
+        return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+    }
+
+    /**
+     * Converts RGB color values to an HSL string.
+     * @param {number} r Red value (0-255).
+     * @param {number} g Green value (0-255).
+     * @param {number} b Blue value (0-255).
+     * @returns {string} The HSL color string.
+     */
+    function rgbToHsl(r, g, b) {
+        r /= 255; g /= 255; b /= 255;
+        var cmin = Math.min(r, g, b), cmax = Math.max(r, g, b), delta = cmax - cmin, h = 0, s = 0, l = 0;
+        if (delta === 0) h = 0;
+        else if (cmax === r) h = ((g - b) / delta) % 6;
+        else if (cmax === g) h = (b - r) / delta + 2;
+        else h = (r - g) / delta + 4;
+        h = Math.round(h * 60);
+        if (h < 0) h += 360;
+        l = (cmax + cmin) / 2;
+        s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+        s = +(s * 100).toFixed(1);
+        l = +(l * 100).toFixed(1);
+        return 'hsl(' + h + ', ' + s + '%, ' + l + '%)';
+    }
+
+    // START OF MUNSELL CONVERSION ALGORITHM
+    // This block contains the functions and data for converting RGB to Munsell.
+    (function(context) {
+        // <<< INIZIO MODIFICA: Database Munsell esteso per suoli e rocce >>>
+        // This dataset is significantly expanded to provide more accurate Munsell estimations,
+        // focusing on hues commonly found in soil and rock science.
+        const munsellData = [
+            { H: 'N', V: 9, C: 0, L: 90.0, a: 0.0, b: 0.0 }, { H: 'N', V: 8, C: 0, L: 80.0, a: 0.0, b: 0.0 },
+            { H: 'N', V: 7, C: 0, L: 70.0, a: 0.0, b: 0.0 }, { H: 'N', V: 6, C: 0, L: 60.0, a: 0.0, b: 0.0 },
+            { H: 'N', V: 5, C: 0, L: 50.8, a: 0.0, b: 0.0 }, { H: 'N', V: 4, C: 0, L: 40.8, a: 0.0, b: 0.0 },
+            { H: 'N', V: 3, C: 0, L: 30.5, a: 0.0, b: 0.0 }, { H: 'N', V: 2, C: 0, L: 20.2, a: 0.0, b: 0.0 },
+            { H: '10R', V: 8, C: 1, L: 81.29, a: 2.8, b: 1.4 }, { H: '10R', V: 8, C: 2, L: 81.29, a: 5.4, b: 2.9 },
+            { H: '10R', V: 7, C: 1, L: 71.04, a: 3.1, b: 1.5 }, { H: '10R', V: 7, C: 2, L: 71.04, a: 6.0, b: 3.1 },
+            { H: '10R', V: 7, C: 4, L: 71.04, a: 11.8, b: 6.2 }, { H: '10R', V: 7, C: 6, L: 71.04, a: 17.5, b: 9.3 },
+            { H: '10R', V: 6, C: 1, L: 61.67, a: 3.4, b: 1.7 }, { H: '10R', V: 6, C: 2, L: 61.67, a: 6.7, b: 3.4 },
+            { H: '10R', V: 6, C: 4, L: 61.67, a: 13.2, b: 6.9 }, { H: '10R', V: 6, C: 6, L: 61.67, a: 19.5, b: 10.3 },
+            { H: '10R', V: 6, C: 8, L: 61.67, a: 25.5, b: 13.8 }, { H: '10R', V: 5, C: 1, L: 51.56, a: 3.6, b: 1.9 },
+            { H: '10R', V: 5, C: 2, L: 51.56, a: 7.2, b: 3.8 }, { H: '10R', V: 5, C: 4, L: 51.56, a: 14.1, b: 7.6 },
+            { H: '10R', V: 5, C: 6, L: 51.56, a: 20.8, b: 11.4 }, { H: '10R', V: 5, C: 8, L: 51.56, a: 27.2, b: 15.1 },
+            { H: '10R', V: 4, C: 1, L: 41.22, a: 3.8, b: 2.0 }, { H: '10R', V: 4, C: 2, L: 41.22, a: 7.5, b: 4.0 },
+            { H: '10R', V: 4, C: 4, L: 41.22, a: 14.6, b: 8.0 }, { H: '10R', V: 4, C: 6, L: 41.22, a: 21.4, b: 11.9 },
+            { H: '10R', V: 3, C: 1, L: 30.9, a: 3.8, b: 2.1 }, { H: '10R', V: 3, C: 2, L: 30.9, a: 7.5, b: 4.2 },
+            { H: '10R', V: 3, C: 4, L: 30.9, a: 14.4, b: 8.2 }, { H: '2.5YR', V: 8, C: 2, L: 81.29, a: 4.4, b: 6.5 },
+            { H: '2.5YR', V: 8, C: 4, L: 81.29, a: 8.3, b: 12.7 }, { H: '2.5YR', V: 7, C: 2, L: 71.04, a: 5.2, b: 7.2 },
+            { H: '2.5YR', V: 7, C: 4, L: 71.04, a: 10.0, b: 14.2 }, { H: '2.5YR', V: 7, C: 6, L: 71.04, a: 14.6, b: 21.0 },
+            { H: '2.5YR', V: 7, C: 8, L: 71.04, a: 19.1, b: 27.6 }, { H: '2.5YR', V: 6, C: 2, L: 61.67, a: 5.9, b: 8.1 },
+            { H: '2.5YR', V: 6, C: 4, L: 61.67, a: 11.4, b: 15.9 }, { H: '2.5YR', V: 6, C: 6, L: 61.67, a: 16.7, b: 23.5 },
+            { H: '2.5YR', V: 6, C: 8, L: 61.67, a: 21.7, b: 30.8 }, { H: '2.5YR', V: 5, C: 2, L: 51.56, a: 6.4, b: 8.8 },
+            { H: '2.5YR', V: 5, C: 4, L: 51.56, a: 12.4, b: 17.3 }, { H: '2.5YR', V: 5, C: 6, L: 51.56, a: 18.2, b: 25.5 },
+            { H: '2.5YR', V: 5, C: 8, L: 51.56, a: 23.6, b: 33.3 }, { H: '2.5YR', V: 4, C: 2, L: 41.22, a: 6.8, b: 9.3 },
+            { H: '2.5YR', V: 4, C: 4, L: 41.22, a: 13.1, b: 18.2 }, { H: '2.5YR', V: 4, C: 6, L: 41.22, a: 19.1, b: 26.6 },
+            { H: '2.5YR', V: 3, C: 2, L: 30.9, a: 6.9, b: 9.6 }, { H: '2.5YR', V: 3, C: 4, L: 30.9, a: 13.4, b: 18.6 },
+            { H: '5YR', V: 8, C: 1, L: 81.29, a: 2.2, b: 5.1 }, { H: '5YR', V: 8, C: 2, L: 81.29, a: 4.3, b: 10.0 },
+            { H: '5YR', V: 8, C: 4, L: 81.29, a: 8.1, b: 19.3 }, { H: '5YR', V: 7, C: 1, L: 71.04, a: 2.7, b: 5.7 },
+            { H: '5YR', V: 7, C: 2, L: 71.04, a: 5.2, b: 11.2 }, { H: '5YR', V: 7, C: 4, L: 71.04, a: 9.8, b: 21.6 },
+            { H: '5YR', V: 7, C: 6, L: 71.04, a: 14.3, b: 31.8 }, { H: '5YR', V: 7, C: 8, L: 71.04, a: 18.7, b: 41.6 },
+            { H: '5YR', V: 6, C: 1, L: 61.67, a: 3.1, b: 6.4 }, { H: '5YR', V: 6, C: 2, L: 61.67, a: 6.0, b: 12.5 },
+            { H: '5YR', V: 6, C: 4, L: 61.67, a: 11.4, b: 24.1 }, { H: '5YR', V: 6, C: 6, L: 61.67, a: 16.6, b: 35.2 },
+            { H: '5YR', V: 6, C: 8, L: 61.67, a: 21.5, b: 45.8 }, { H: '5YR', V: 5, C: 1, L: 51.56, a: 3.4, b: 6.9 },
+            { H: '5YR', V: 5, C: 2, L: 51.56, a: 6.6, b: 13.6 }, { H: '5YR', V: 5, C: 3, L: 51.56, a: 9.8, b: 20.2 },
+            { H: '5YR', V: 5, C: 4, L: 51.56, a: 12.8, b: 26.5 }, { H: '5YR', V: 5, C: 6, L: 51.56, a: 18.6, b: 38.8 },
+            { H: '5YR', V: 5, C: 8, L: 51.56, a: 24.1, b: 50.4 }, { H: '5YR', V: 4, C: 1, L: 41.22, a: 3.6, b: 7.3 },
+            { H: '5YR', V: 4, C: 2, L: 41.22, a: 7.0, b: 14.3 }, { H: '5YR', V: 4, C: 3, L: 41.22, a: 10.3, b: 21.1 },
+            { H: '5YR', V: 4, C: 4, L: 41.22, a: 13.5, b: 27.8 }, { H: '5YR', V: 4, C: 6, L: 41.22, a: 19.4, b: 40.2 },
+            { H: '5YR', V: 3, C: 1, L: 30.9, a: 3.7, b: 7.5 }, { H: '5YR', V: 3, C: 2, L: 30.9, a: 7.2, b: 14.6 },
+            { H: '5YR', V: 3, C: 3, L: 30.9, a: 10.5, b: 21.4 }, { H: '5YR', V: 2.5, C: 2, L: 25.4, a: 7.2, b: 14.2 },
+            { H: '7.5YR', V: 8, C: 2, L: 81.29, a: 3.6, b: 14.4 }, { H: '7.5YR', V: 8, C: 4, L: 81.29, a: 6.6, b: 27.5 },
+            { H: '7.5YR', V: 7, C: 2, L: 71.04, a: 4.5, b: 15.9 }, { H: '7.5YR', V: 7, C: 4, L: 71.04, a: 8.3, b: 30.2 },
+            { H: '7.5YR', V: 7, C: 6, L: 71.04, a: 12.0, b: 43.8 }, { H: '7.5YR', V: 6, C: 2, L: 61.67, a: 5.2, b: 17.5 },
+            { H: '7.5YR', V: 6, C: 4, L: 61.67, a: 9.7, b: 33.3 }, { H: '7.5YR', V: 6, C: 6, L: 61.67, a: 13.9, b: 48.0 },
+            { H: '7.5YR', V: 6, C: 8, L: 61.67, a: 18.0, b: 62.0 }, { H: '7.5YR', V: 5, C: 2, L: 51.56, a: 5.8, b: 18.9 },
+            { H: '7.5YR', V: 5, C: 4, L: 51.56, a: 10.8, b: 35.6 }, { H: '7.5YR', V: 5, C: 6, L: 51.56, a: 15.5, b: 51.3 },
+            { H: '7.5YR', V: 5, C: 8, L: 51.56, a: 19.9, b: 66.0 }, { H: '7.5YR', V: 4, C: 2, L: 41.22, a: 6.1, b: 19.8 },
+            { H: '7.5YR', V: 4, C: 4, L: 41.22, a: 11.4, b: 37.2 }, { H: '7.5YR', V: 4, C: 6, L: 41.22, a: 16.4, b: 53.4 },
+            { H: '7.5YR', V: 3, C: 2, L: 30.9, a: 6.3, b: 20.2 }, { H: '7.5YR', V: 3, C: 4, L: 30.9, a: 11.7, b: 37.8 },
+            { H: '10YR', V: 8, C: 1, L: 81.29, a: 1.0, b: 8.6 }, { H: '10YR', V: 8, C: 2, L: 81.29, a: 2.0, b: 17.0 },
+            { H: '10YR', V: 8, C: 3, L: 81.29, a: 2.9, b: 25.1 }, { H: '10YR', V: 8, C: 4, L: 81.29, a: 3.8, b: 32.8 },
+            { H: '10YR', V: 8, C: 6, L: 81.29, a: 5.5, b: 47.7 }, { H: '10YR', V: 7, C: 1, L: 71.04, a: 1.3, b: 9.4 },
+            { H: '10YR', V: 7, C: 2, L: 71.04, a: 2.6, b: 18.5 }, { H: '10YR', V: 7, C: 3, L: 71.04, a: 3.8, b: 27.4 },
+            { H: '10YR', V: 7, C: 4, L: 71.04, a: 5.0, b: 35.9 }, { H: '10YR', V: 7, C: 6, L: 71.04, a: 7.3, b: 52.3 },
+            { H: '10YR', V: 6, C: 1, L: 61.67, a: 1.6, b: 10.3 }, { H: '10YR', V: 6, C: 2, L: 61.67, a: 3.1, b: 20.2 },
+            { H: '10YR', V: 6, C: 3, L: 61.67, a: 4.6, b: 29.8 }, { H: '10YR', V: 6, C: 4, L: 61.67, a: 6.0, b: 39.0 },
+            { H: '10YR', V: 6, C: 6, L: 61.67, a: 8.7, b: 56.7 }, { H: '10YR', V: 5, C: 1, L: 51.56, a: 1.8, b: 10.9 },
+            { H: '10YR', V: 5, C: 2, L: 51.56, a: 3.5, b: 21.4 }, { H: '10YR', V: 5, C: 3, L: 51.56, a: 5.2, b: 31.6 },
+            { H: '10YR', V: 5, C: 4, L: 51.56, a: 6.8, b: 41.4 }, { H: '10YR', V: 5, C: 6, L: 51.56, a: 9.9, b: 60.0 },
+            { H: '10YR', V: 4, C: 1, L: 41.22, a: 2.0, b: 11.3 }, { H: '10YR', V: 4, C: 2, L: 41.22, a: 3.8, b: 22.1 },
+            { H: '10YR', V: 4, C: 3, L: 41.22, a: 5.6, b: 32.5 }, { H: '10YR', V: 4, C: 4, L: 41.22, a: 7.3, b: 42.4 },
+            { H: '10YR', V: 3, C: 1, L: 30.9, a: 2.1, b: 11.5 }, { H: '10YR', V: 3, C: 2, L: 30.9, a: 4.0, b: 22.5 },
+            { H: '10YR', V: 2, C: 1, L: 20.6, a: 2.1, b: 11.2 }, { H: '10YR', V: 2, C: 2, L: 20.6, a: 3.9, b: 21.5 },
+            { H: '2.5Y', V: 8, C: 2, L: 81.29, a: -1.0, b: 19.3 }, { H: '2.5Y', V: 8, C: 4, L: 81.29, a: -2.1, b: 37.8 },
+            { H: '2.5Y', V: 8, C: 6, L: 81.29, a: -3.2, b: 55.4 }, { H: '2.5Y', V: 8, C: 8, L: 81.29, a: -4.3, b: 72.1 },
+            { H: '2.5Y', V: 7, C: 2, L: 71.04, a: -1.1, b: 20.7 }, { H: '2.5Y', V: 7, C: 4, L: 71.04, a: -2.3, b: 40.4 },
+            { H: '2.5Y', V: 7, C: 6, L: 71.04, a: -3.5, b: 59.2 }, { H: '2.5Y', V: 7, C: 8, L: 71.04, a: -4.8, b: 76.9 },
+            { H: '2.5Y', V: 6, C: 2, L: 61.67, a: -1.1, b: 21.6 }, { H: '2.5Y', V: 6, C: 4, L: 61.67, a: -2.3, b: 42.1 },
+            { H: '2.5Y', V: 6, C: 6, L: 61.67, a: -3.6, b: 61.5 }, { H: '2.5Y', V: 6, C: 8, L: 61.67, a: -4.9, b: 79.9 },
+            { H: '2.5Y', V: 5, C: 2, L: 51.56, a: -1.0, b: 21.9 }, { H: '2.5Y', V: 5, C: 4, L: 51.56, a: -2.2, b: 42.6 },
+            { H: '2.5Y', V: 5, C: 6, L: 51.56, a: -3.4, b: 62.2 }, { H: '2.5Y', V: 4, C: 2, L: 41.22, a: -0.9, b: 21.7 },
+            { H: '2.5Y', V: 4, C: 4, L: 41.22, a: -1.9, b: 42.2 }, { H: '2.5Y', V: 3, C: 2, L: 30.9, a: -0.7, b: 20.9 },
+            { H: '5Y', V: 8, C: 2, L: 81.29, a: -4.1, b: 20.8 }, { H: '5Y', V: 8, C: 4, L: 81.29, a: -8.1, b: 40.5 },
+            { H: '5Y', V: 8, C: 6, L: 81.29, a: -11.9, b: 59.1 }, { H: '5Y', V: 8, C: 8, L: 81.29, a: -15.6, b: 76.4 },
+            { H: '5Y', V: 7, C: 2, L: 71.04, a: -4.3, b: 22.3 }, { H: '5Y', V: 7, C: 4, L: 71.04, a: -8.5, b: 43.4 },
+            { H: '5Y', V: 7, C: 6, L: 71.04, a: -12.5, b: 63.3 }, { H: '5Y', V: 7, C: 8, L: 71.04, a: -16.3, b: 81.9 },
+            { H: '5Y', V: 6, C: 2, L: 61.67, a: -4.4, b: 23.3 }, { H: '5Y', V: 6, C: 4, L: 61.67, a: -8.6, b: 45.3 },
+            { H: '5Y', V: 6, C: 6, L: 61.67, a: -12.6, b: 65.9 }, { H: '5Y', V: 6, C: 8, L: 61.67, a: -16.4, b: 85.3 },
+            { H: '5Y', V: 5, C: 2, L: 51.56, a: -4.3, b: 23.5 }, { H: '5Y', V: 5, C: 4, L: 51.56, a: -8.5, b: 45.7 },
+            { H: '5Y', V: 5, C: 6, L: 51.56, a: -12.5, b: 66.6 }, { H: '5Y', V: 4, C: 2, L: 41.22, a: -4.2, b: 23.2 },
+            { H: '5Y', V: 4, C: 4, L: 41.22, a: -8.1, b: 44.9 }, { H: '5Y', V: 3, C: 2, L: 30.9, a: -3.8, b: 22.2 }
+        ];
+        // <<< FINE MODIFICA >>>
+
+        function rgbToXyz(r, g, b) {
+            r /= 255; g /= 255; b /= 255;
+            r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
+            g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
+            b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
+            r *= 100; g *= 100; b *= 100;
+            return [
+                r * 0.4124 + g * 0.3576 + b * 0.1805,
+                r * 0.2126 + g * 0.7152 + b * 0.0722,
+                r * 0.0193 + g * 0.1192 + b * 0.9505
+            ];
+        }
+
+        function xyzToLab(x, y, z) {
+            const refX = 95.047, refY = 100.000, refZ = 108.883; // D65 Illuminant
+            x /= refX; y /= refY; z /= refZ;
+            x = x > 0.008856 ? Math.pow(x, 1 / 3) : (7.787 * x) + (16 / 116);
+            y = y > 0.008856 ? Math.pow(y, 1 / 3) : (7.787 * y) + (16 / 116);
+            z = z > 0.008856 ? Math.pow(z, 1 / 3) : (7.787 * z) + (16 / 116);
+            return [(116 * y) - 16, 500 * (x - y), 200 * (y - z)];
+        }
+        
+        function getClosestMunsell(L, a, b) {
+            let minDistance = Infinity;
+            let closest = null;
+
+            for (const munsell of munsellData) {
+                // Using CIE76 Delta E formula for distance
+                const dL = L - munsell.L;
+                const da = a - munsell.a;
+                const db = b - munsell.b;
+                const distance = Math.sqrt(dL * dL + da * da + db * db);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closest = munsell;
+                }
+            }
+            
+            // <<< INIZIO MODIFICA: Formattazione Munsell standardizzata >>>
+            if (!closest) {
+                return "N/A";
+            }
+            
+            if (closest.H === "N") {
+                // Standard notation for neutral colors (e.g., N 5/)
+                return `N ${closest.V}/`;
+            }
+            
+            // Standard notation for chromatic colors is H V/C (e.g., 5YR 5/6)
+            return `${closest.H} ${closest.V}/${closest.C}`;
+            // <<< FINE MODIFICA >>>
+        }
+
+        context.rgbToMunsell = function(r, g, b) {
+            try {
+                const [x, y, z] = rgbToXyz(r, g, b);
+                const [L, a, lab_b] = xyzToLab(x, y, z);
+                return getClosestMunsell(L, a, lab_b);
+            } catch(e) {
+                console.error("Munsell conversion error:", e);
+                return "N/A";
+            }
+        };
+    })(window);
+    // END OF MUNSELL CONVERSION ALGORITHM
+    
+    /**
+     * Updates the color display and value fields.
+     * @param {number} r Red value.
+     * @param {number} g Green value.
+     * @param {number} b Blue value.
+     */
+    function updateColorDisplay(r, g, b) {
+        var rgbString = 'rgb(' + r + ', ' + g + ', ' + b + ')';
+        colorDisplay.style.backgroundColor = rgbString;
+        document.querySelector('#rgbValue').textContent = `${r}, ${g}, ${b}`;
+        document.querySelector('#hexValue').textContent = rgbToHex(r, g, b);
+        document.querySelector('#hslValue').textContent = rgbToHsl(r, g, b);
+        document.querySelector('#munsellValue').textContent = window.rgbToMunsell(r, g, b);
+    }
+    
+    /**
+     * Handles the image upload process.
+     * @param {Event} event The file input change event.
+     */
+    function handleImageUpload(event) {
+        var file = event.target.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            showMessage('Per favore, carica un file immagine valido.', 'error');
+            return;
+        }
+
+        // Reset state for new image
+        reportState.imageFileName = file.name;
+        reportState.clickCoordinates = null;
+        reportState.selectedColor = null;
+        reportState.samplingMode = null;
+        reportState.spotSize = null;
+        reportState.munsellValue = null;
+        exportPdfButton.setAttribute('disabled', true);
+        exportPdfButton.classList.add('btn-disabled');
+
+        var reader = new FileReader();
+
+        reader.onloadstart = function() {
+            progressContainer.classList.remove('hidden');
+            progressBar.style.width = '0%';
+        };
+
+        reader.onprogress = function(event) {
+            if (event.lengthComputable) {
+                var percentLoaded = Math.round((event.loaded / event.total) * 100);
+                progressBar.style.width = percentLoaded + '%';
+            }
+        };
+        
+        reader.onload = function(e) {
+            currentImage.onload = function() {
+                // Draw image to canvas
+                imageCanvas.width = currentImage.naturalWidth;
+                imageCanvas.height = currentImage.naturalHeight;
+                ctx.drawImage(currentImage, 0, 0);
+                handleResize();
+                
+                // Setup magnifier
+                magnifierLoupe.classList.remove('hidden');
+                magnifierLoupe.style.backgroundImage = 'url(' + currentImage.src + ')';
+                magnifierLoupe.style.backgroundSize = (currentImage.width * zoomFactor) + 'px ' + (currentImage.height * zoomFactor) + 'px';
+                
+                showMessage('Immagine caricata. Clicca per selezionare un colore.', 'info');
+
+                setTimeout(function() {
+                    progressContainer.classList.add('hidden');
+                }, 500);
+            };
+            currentImage.onerror = function() { 
+                showMessage('Impossibile caricare l\'immagine.', 'error');
+                progressContainer.classList.add('hidden');
+            };
+            currentImage.src = e.target.result;
+        };
+
+        reader.onerror = function() {
+            showMessage('Errore durante la lettura del file.', 'error');
+            progressContainer.classList.add('hidden');
+        };
+
+        reader.readAsDataURL(file);
+    }
+
+    imageUpload.addEventListener('change', handleImageUpload);
+    
+    /**
+     * Handles clicks on the canvas to pick a color.
+     * @param {MouseEvent} event The click event.
+     */
+    imageCanvas.addEventListener('click', function(event) {
+        if (!currentImage.src) {
+            showMessage('Per favore, carica prima un\'immagine.', 'error');
+            return;
+        }
+
+        var currentSpotSize = parseInt(spotSizeInput.value, 10);
+        if (isNaN(currentSpotSize) || currentSpotSize < 1) {
+            showMessage('La dimensione dell\'area deve essere un numero intero positivo.', 'error');
+            return;
+        }
+
+        // Get coordinates on the canvas
+        var rect = imageCanvas.getBoundingClientRect();
+        var scaleX = imageCanvas.width / rect.width;
+        var scaleY = imageCanvas.height / rect.height;
+        var x = Math.floor((event.clientX - rect.left) * scaleX);
+        var y = Math.floor((event.clientY - rect.top) * scaleY);
+
+        // Position the selection indicator dot
+        var parentRect = canvasContainer.getBoundingClientRect();
+        var dotX = (x / scaleX) + rect.left - parentRect.left;
+        var dotY = (y / scaleY) + rect.top - parentRect.top;
+        selectionDot.style.left = dotX + 'px';
+        selectionDot.style.top = dotY + 'px';
+        selectionDot.classList.remove('hidden');
+        
+        // Calculate sampling area
+        var halfSpot = Math.floor(currentSpotSize / 2);
+        var startX = Math.max(0, x - halfSpot);
+        var startY = Math.max(0, y - halfSpot);
+        var areaWidth = Math.min(imageCanvas.width - startX, currentSpotSize);
+        var areaHeight = Math.min(imageCanvas.height - startY, currentSpotSize);
+
+        // Display the selection area rectangle
+        var areaDisplayX = (startX / scaleX) + rect.left - parentRect.left;
+        var areaDisplayY = (startY / scaleY) + rect.top - parentRect.top;
+        var areaDisplayWidth = areaWidth / scaleX;
+        var areaDisplayHeight = areaHeight / scaleY;
+
+        selectionArea.style.left = areaDisplayX + 'px';
+        selectionArea.style.top = areaDisplayY + 'px';
+        selectionArea.style.width = areaDisplayWidth + 'px';
+        selectionArea.style.height = areaDisplayHeight + 'px';
+        selectionArea.classList.toggle('hidden', currentSpotSize <= 1);
+
+        try {
+            var mode = samplingModeSelect.value;
+            var avgR, avgG, avgB;
+
+            if (mode === 'exact' || currentSpotSize === 1) {
+                // Get single pixel data
+                var pixelData = ctx.getImageData(x, y, 1, 1).data;
+                avgR = pixelData[0];
+                avgG = pixelData[1];
+                avgB = pixelData[2];
+            } else {
+                // Get image data for the whole area
+                var imageData = ctx.getImageData(startX, startY, areaWidth, areaHeight).data;
+                var totalR = 0, totalG = 0, totalB = 0, totalWeight = 0;
+                for (var i = 0; i < imageData.length; i += 4) {
+                    var weight = 1;
+                    if (mode === 'weighted') {
+                        // Calculate weight based on distance from center for 'weighted' mode
+                        var pixelIndexInArea = i / 4;
+                        var currentX = startX + (pixelIndexInArea % areaWidth);
+                        var currentY = startY + Math.floor(pixelIndexInArea / areaWidth);
+                        var dx = currentX - x;
+                        var dy = currentY - y;
+                        weight = 1 / (1 + dx * dx + dy * dy);
+                    }
+                    totalR += imageData[i] * weight;
+                    totalG += imageData[i + 1] * weight;
+                    totalB += imageData[i + 2] * weight;
+                    totalWeight += weight;
+                }
+                if (totalWeight > 0) {
+                    avgR = Math.round(totalR / totalWeight);
+                    avgG = Math.round(totalG / totalWeight);
+                    avgB = Math.round(totalB / totalWeight);
+                } else { throw new Error("Area non valida."); }
+            }
+
+            updateColorDisplay(avgR, avgG, avgB);
+
+            // Update state for PDF export
+            reportState.clickCoordinates = { x: x, y: y };
+            reportState.selectedColor = { r: avgR, g: avgG, b: avgB };
+            reportState.samplingMode = samplingModeSelect.options[samplingModeSelect.selectedIndex].text;
+            reportState.spotSize = currentSpotSize;
+            reportState.munsellValue = document.getElementById('munsellValue').textContent;
+            exportPdfButton.removeAttribute('disabled');
+            exportPdfButton.classList.remove('btn-disabled');
+
+        } catch (error) {
+            var errorMessage = 'Errore durante la lettura dei pixel: ' + error.message;
+            if (error.name === "SecurityError") {
+                errorMessage = 'Errore di sicurezza (CORS). Impossibile leggere i pixel da questa fonte di immagine.';
+            }
+            showMessage(errorMessage, 'error');
+        }
+    });
+    
+    /**
+     * Handles window resize to adjust canvas display size.
+     */
+    function handleResize() {
+        if (!currentImage.src) return;
+        var container = canvasContainer;
+        var maxWidth = container.offsetWidth;
+        var aspect = currentImage.naturalWidth / currentImage.naturalHeight;
+        imageCanvas.style.width = maxWidth + 'px';
+        imageCanvas.style.height = (maxWidth / aspect) + 'px';
+    }
+
+    window.addEventListener('resize', debounce(handleResize, 150));
+    window.onload = function() {
+        showMessage('Benvenuta! Carica un\'immagine per iniziare.', 'info');
+    };
+
+    /**
+     * Exports the analysis report to a PDF file.
+     */
+    function exportToPDF() {
+        if (!reportState.selectedColor) {
+            showMessage('Selezionare un colore prima di esportare.', 'error');
+            return;
+        }
+
+        var doc = new jsPDF({
+            orientation: 'portrait',
+            unit: 'mm',
+            format: 'a4'
+        });
+
+        // Get data from state
+        var imageFileName = reportState.imageFileName;
+        var clickCoordinates = reportState.clickCoordinates;
+        var selectedColor = reportState.selectedColor;
+        var r = selectedColor.r, g = selectedColor.g, b = selectedColor.b;
+        const userNotes = document.getElementById('userNotes').value;
+
+        var pageW = doc.internal.pageSize.getWidth();
+        var pageH = doc.internal.pageSize.getHeight();
+        var margin = 20;
+
+        // Header
+        doc.setFontSize(20);
+        doc.setFont("helvetica", "bold");
+        doc.text("Report Analisi Colore", pageW / 2, margin, { align: "center" });
+
+        // File Info
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "normal");
+        var date = new Date().toLocaleDateString('it-IT', { year: 'numeric', month: 'long', day: 'numeric' });
+        doc.text('Data: ' + date, pageW - margin, margin + 10, { align: "right" });
+
+        // --- START IMAGE SECTION ---
+        var imgSectionY = margin + 20;
+        
+        // Calculate image dimensions for PDF
+        var imgWidthOnPdf = pageW - margin * 2; // Use full page width with margins
+        var aspectRatio = currentImage.naturalHeight / currentImage.naturalWidth;
+        var imgHeightOnPdf = imgWidthOnPdf * aspectRatio;
+        var maxImgHeight = 100; // Adjusted max height for the image in mm
+        if (imgHeightOnPdf > maxImgHeight) {
+            imgHeightOnPdf = maxImgHeight;
+            imgWidthOnPdf = imgHeightOnPdf / aspectRatio;
+        }
+        var imgX = (pageW - imgWidthOnPdf) / 2; // Center the image
+        
+        // Add image to PDF
+        doc.addImage(currentImage, 'JPEG', imgX, imgSectionY, imgWidthOnPdf, imgHeightOnPdf);
+        
+        // Draw sampling area indicator on the PDF image
+        var scalePdfX = imgWidthOnPdf / currentImage.naturalWidth;
+        var scalePdfY = imgHeightOnPdf / currentImage.naturalHeight;
+        var spotSize = reportState.spotSize;
+        var clickX = reportState.clickCoordinates.x;
+        var clickY = reportState.clickCoordinates.y;
+        var halfSpot = Math.floor(spotSize / 2);
+        var rectStartX = Math.max(0, clickX - halfSpot);
+        var rectStartY = Math.max(0, clickY - halfSpot);
+        
+        var rectX_pdf = imgX + rectStartX * scalePdfX;
+        var rectY_pdf = imgSectionY + rectStartY * scalePdfY;
+        var rectW_pdf = spotSize * scalePdfX;
+        var rectH_pdf = spotSize * scalePdfY;
+
+        doc.setDrawColor(255, 0, 0); // Red color for indicator
+        doc.setLineWidth(0.5);
+        doc.rect(rectX_pdf, rectY_pdf, rectW_pdf, rectH_pdf); // Draw sampling area box
+
+        // Draw crosshair at the center of the click
+        var crosshairX_pdf = imgX + clickX * scalePdfX;
+        var crosshairY_pdf = imgSectionY + clickY * scalePdfY;
+        var crosshairSize = 3; // size in mm
+        doc.line(crosshairX_pdf - crosshairSize, crosshairY_pdf, crosshairX_pdf + crosshairSize, crosshairY_pdf); // Horizontal
+        doc.line(crosshairX_pdf, crosshairY_pdf - crosshairSize, crosshairX_pdf, crosshairY_pdf + crosshairSize); // Vertical
+        // --- END IMAGE SECTION ---
+
+        // --- START DETAILS SECTION ---
+        var currentY = imgSectionY + imgHeightOnPdf + 12;
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.text("Dettagli Analisi", margin, currentY);
+        
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        currentY += 6;
+        doc.text('File immagine: ' + imageFileName, margin, currentY);
+        currentY += 5;
+        doc.text('Modalità campionamento: ' + reportState.samplingMode, margin, currentY);
+        currentY += 5;
+        doc.text('Dimensione area: ' + reportState.spotSize + 'x' + reportState.spotSize + ' px', margin, currentY);
+        currentY += 5;
+        doc.text('Coordinate punto (px): X: ' + clickCoordinates.x + ', Y: ' + clickCoordinates.y, margin, currentY);
+
+        // Selected Color Info
+        currentY += 10;
+        doc.setFont("helvetica", "bold");
+        doc.text("Colore Selezionato:", margin, currentY);
+        
+        var swatchSize = 25;
+        doc.setFillColor(r, g, b);
+        doc.rect(margin, currentY + 3, swatchSize, swatchSize, 'F');
+
+        var textX = margin + swatchSize + 10;
+        var textY = currentY + 5;
+        
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.text("Valore Munsell Stimato:", textX, textY);
+        
+        doc.setFontSize(14);
+        textY += 7;
+        doc.text(reportState.munsellValue, textX, textY);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        textY += 8; 
+        doc.text('RGB: ' + r + ', ' + g + ', ' + b, textX, textY);
+        textY += 5;
+        doc.text('Hex: ' + rgbToHex(r, g, b), textX, textY);
+        textY += 5;
+        doc.text('HSL: ' + rgbToHsl(r, g, b), textX, textY);
+        
+        // --- START NOTES SECTION ---
+        if (userNotes && userNotes.trim() !== '') {
+            currentY = Math.max(currentY, textY) + 10; // Ensure currentY is below the color details block
+            doc.setFontSize(12);
+            doc.setFont("helvetica", "bold");
+            doc.text("Note Aggiuntive", margin, currentY);
+            
+            doc.setFontSize(10);
+            doc.setFont("helvetica", "normal");
+            currentY += 7;
+            var splitNotes = doc.splitTextToSize(userNotes, pageW - margin * 2);
+            doc.text(splitNotes, margin, currentY);
+        }
+        // --- END NOTES SECTION ---
+
+        // --- START FOOTER SECTION ---
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text("Colorimetro v. 1.0 - © C. Tessaro", pageW / 2, pageH - 10, { align: 'center' });
+        // --- END FOOTER SECTION ---
+
+
+        // Save the PDF
+        doc.save('Report_Colore_' + imageFileName.split('.')[0] + '.pdf');
+    }
+    
+    exportPdfButton.addEventListener('click', exportToPDF);
+    
+    /**
+     * Moves the magnifier loupe over the canvas.
+     * @param {MouseEvent} event The mousemove event.
+     */
+    function moveMagnifier(event) {
+        if (!currentImage.src) return;
+
+        var rect = imageCanvas.getBoundingClientRect();
+        var loupeSize = magnifierLoupe.offsetWidth;
+
+        var mouseX = event.clientX - rect.left;
+        var mouseY = event.clientY - rect.top;
+
+        if (mouseX < 0 || mouseX > rect.width || mouseY < 0 || mouseY > rect.height) {
+            return; // Mouse is outside the canvas
+        }
+
+        // Get true image coordinates
+        var scaleX = imageCanvas.width / rect.width;
+        var scaleY = imageCanvas.height / rect.height;
+        var trueX = Math.floor(mouseX * scaleX);
+        var trueY = Math.floor(mouseY * scaleY);
+
+        magnifierCoords.textContent = 'X:' + trueX + ' Y:' + trueY;
+
+        // Calculate background position for the magnifier
+        var bgX = -(trueX * zoomFactor - loupeSize / 2);
+        var bgY = -(trueY * zoomFactor - loupeSize / 2);
+        magnifierLoupe.style.backgroundPosition = bgX + 'px ' + bgY + 'px';
+    }
+
+    canvasContainer.addEventListener('mousemove', moveMagnifier);
+
+    // Modal Logic
+    const modalContent = infoModal.querySelector('.modal-content');
+    infoButton.addEventListener('click', () => {
+        infoModal.classList.remove('hidden');
+        setTimeout(() => {
+            infoModal.classList.remove('opacity-0');
+            modalContent.classList.remove('scale-95');
+        }, 10);
+    });
+
+    function closeModal() {
+        infoModal.classList.add('opacity-0');
+        modalContent.classList.add('scale-95');
+        setTimeout(() => {
+            infoModal.classList.add('hidden');
+        }, 300);
+    }
+
+    closeModalButton.addEventListener('click', closeModal);
+    infoModal.addEventListener('click', (e) => {
+        if (e.target === infoModal) {
+            closeModal();
+        }
+    });
+
+</script>
+</body>
+</html>

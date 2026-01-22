@@ -1,0 +1,12 @@
+© 2026 Carlo Tessaro
+
+This software is provided for academic and research use only.
+
+Permission is granted to use the software for non-commercial,
+academic, and research purposes.
+
+Redistribution, modification, or commercial use of this software,
+in whole or in part, is not permitted without explicit written
+permission from the author.
+
+The software is provided "as is", without warranty of any kind.
