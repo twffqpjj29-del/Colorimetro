@@ -72,8 +72,7 @@ Lo script:
 - Esegui:
 
 ```
-  cd %USERPROFILE%\Desktop\colorimetro
-run_windows.bat
+  cd /colorimetro/run_windows.bat
 
 ```
 
@@ -86,7 +85,7 @@ Gli utenti possono scaricare una specifica versione dalla sezione Releases.
 ### macOS / Linux (esempio)
 
 ```
-cd ~/Desktop && \
+cd ~/
 curl -L -o colorimetro.zip https://github.com/<OWNER>/<REPO>/archive/refs/tags/v0.4.0.zip && \
 unzip -q colorimetro.zip && \
 mv <REPO>-0.4.0 colorimetro && \
@@ -96,7 +95,7 @@ rm colorimetro.zip
 ### Windows PowerShell (esempio)
 
 ```
-cd $HOME\Desktop
+cd $HOME\CARTELLA
 Invoke-WebRequest -Uri https://github.com/<OWNER>/<REPO>/archive/refs/tags/v0.4.0.zip -OutFile colorimetro.zip
 Expand-Archive colorimetro.zip .
 Rename-Item <REPO>-0.4.0 colorimetro
@@ -104,6 +103,7 @@ Remove-Item colorimetro.zip
 ```
 
 Sostituisci <OWNER> e <REPO> con i valori del repository GitHub.
+Sostituisci <CARTELLA> con il nome della cartella desiderato
 
 ---
 
